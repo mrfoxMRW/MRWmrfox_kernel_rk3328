@@ -1,0 +1,168 @@
+// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
+/*
+ * Copyright (c) 2020 FriendlyElec Computer Tech. Co., Ltd.
+ * (http://www.friendlyarm.com)
+ */
+
+/dts-v1/;
+#include "rk3328-nanopi-r2-common.dtsi"
+#include "rk3328-nanopi-r2-dram-timing.dtsi"
+
+/ {
+	model = "FriendlyElec NanoPi NEO3";
+	compatible = "friendlyelec,nanopi-neo3", "rockchip,rk3328";
+
+	/* 新增1：波轮按键的gpio-keys节点直接写在/{}下，和sound节点同级 */
+	gpio_keys_wheel: gpio-keys-wheels {
+		compatible = "gpio-keys";
+		status = "okay";  /* 新增这一行，强制启用该节点 */
+		pinctrl-names = "default";
+		/* 引用新增的PIN配置下面会定义 */
+		pinctrl-0 = <&gpio_key_wheel_pins>;
+
+		/* K1 - 上键GPIO3A4 */
+		button@1 {
+			gpios = <&gpio3 RK_PA4 GPIO_ACTIVE_LOW>;
+			label = "K1_UP";
+			linux,code = <KEY_UP>;
+			debounce-interval = <20>;
+		};
+
+		/* K2 - 下键 GPIO3A5 */
+		button@2 {
+			gpios = <&gpio3 RK_PA5 GPIO_ACTIVE_LOW>;
+			label = "K2_DOWN";
+			linux,code = <KEY_DOWN>;
+			debounce-interval = <20>;
+		};
+
+		/* K3 - 确认键 GPIO3A6 */
+		button@3 {
+			gpios = <&gpio3 RK_PA6 GPIO_ACTIVE_LOW>;
+			label = "K3_ENTER";
+			linux,code = <KEY_ENTER>;
+			debounce-interval = <20>;
+		};
+	};
+
+	speaker_out: speaker-codec {
+		compatible = "maxim,max98357a";
+		#sound-dai-cells = <0>;
+		status = "okay";
+	};
+
+	mic_in: mic-codec {
+		compatible = "linux,dmic";
+		#sound-dai-cells = <0>;
+		status = "okay";
+	};
+        
+	sound {
+                compatible = "simple-audio-card";
+                simple-audio-card,name = "NEO3-FullDuplex";
+		status = "okay";
+
+		/* 播放链路 Playback */
+		simple_dai_playback: simple-audio-card,dai-link@0 {
+			simple-audio-card,format = "i2s";			
+			simple-audio-card,bitclock-master = <&cpudai0>;
+			simple-audio-card,frame-master = <&cpudai0>;
+
+			cpudai0: cpu {
+				sound-dai = <&i2s1>;
+			};
+			codec {
+				sound-dai = <&speaker_out>;
+			};
+		};
+
+		/* 录音链路 Capture */
+		simple_dai_capture: simple-audio-card,dai-link@1 {
+			simple-audio-card,format = "i2s";
+			simple-audio-card,bitclock-master = <&cpudai1>;
+			simple-audio-card,frame-master = <&cpudai1>;
+
+			cpudai1: cpu {
+				sound-dai = <&i2s1>;
+			};
+			codec {
+				sound-dai = <&mic_in>;
+			};
+		};
+
+        };
+
+};
+
+/* 新增2：PIN脚配置 在&pinctrl节点中补充 */
+&pinctrl {
+	rockchip-key {
+		/* 新增波轮按键的PIN配置 GPIO3A4/3A5/3A6设为GPIO功能 */
+		gpio_key_wheel_pins: gpio-key-wheel-pins {
+			rockchip,pins = <3 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,
+					<3 RK_PA5 RK_FUNC_GPIO &pcfg_pull_none>,
+					<3 RK_PA6 RK_FUNC_GPIO &pcfg_pull_none>;
+		};
+	};
+	/* 新增：禁用UART1的PIN脚配置，将其设为GPIO功能 */
+	uart1 {
+		uart1_xfer: uart1-xfer {
+			rockchip,pins = <3 RK_PA4 RK_FUNC_GPIO &pcfg_pull_none>,  /* 原UART1_TX → GPIO */
+					<3 RK_PA6 RK_FUNC_GPIO &pcfg_pull_none>;  /* 原UART1_RX → GPIO */
+		};
+
+		uart1_cts: uart1-cts {
+			rockchip,pins = <3 RK_PA7 RK_FUNC_GPIO &pcfg_pull_none>;  /* 原UART1_CTS → GPIO 不用也设为GPIO，避免占用 */
+		};
+
+		uart1_rts: uart1-rts {
+			rockchip,pins = <3 RK_PA5 RK_FUNC_GPIO &pcfg_pull_none>;  /* 原UART1_RTS → GPIO */
+		};
+	};
+};
+
+&mach {
+	hwrev = <2>;
+	model = "NanoPi NEO3";
+};
+
+&vccio_sd {
+	status = "okay";
+};
+
+&io_domains {
+	vccio3-supply = <&vccio_sd>;
+};
+
+&sdmmc {
+	vqmmc-supply = <&vccio_sd>;
+	max-frequency = <150000000>;
+	sd-uhs-sdr50;
+	sd-uhs-sdr104;
+	status = "okay";
+};
+
+&i2s1 {
+	#sound-dai-cells = <0>;
+	status = "okay";
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2s1_mclk &i2s1_sclk &i2s1_lrcktx &i2s1_sdo &i2s1_sdi>;
+	/*pinctrl-names = "default";*/
+	/* rockchip,grf = <&grf>; */
+	/* rockchip,clk-src = <1>; */
+};
+
+&uart1 {
+	status = "disabled";
+	pinctrl-0 = <>;  /* 清空PIN脚配置，避免引用原uart1_xfer */
+	/* pinctrl-0 = <&uart1_xfer>; */
+};
+
+&usb20_otg {
+	dr_mode = "host";
+};
+
+&i2c0 {
+	clock-frequency = <400000>;
+	status = "okay";
+};
