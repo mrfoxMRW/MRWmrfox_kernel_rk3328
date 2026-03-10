@@ -9,10 +9,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: 安装系统依赖（zip、curl 等）
+      - name: 安装系统依赖
         run: |
           sudo apt-get -y update
-          sudo apt-get install -y sudo curl zip
+          sudo apt-get install -y sudo curl gzip tar
 
       - name: 安装 FriendlyElec 编译环境
         run: |
@@ -22,10 +22,6 @@ jobs:
         run: |
           echo "/opt/FriendlyARM/toolchain/11.3-aarch64/bin" >> $GITHUB_PATH
           echo "GCC_COLORS=auto" >> $GITHUB_ENV
-
-      - name: 验证 toolchain
-        run: aarch64-linux-gcc -v
-
 
       - name: 验证 toolchain
         run: aarch64-linux-gcc -v
@@ -49,7 +45,6 @@ jobs:
       - name: 准备编译环境
         run: |
           cd MRWmrfox_kernel_rk3328
-          export PATH=/opt/FriendlyARM/toolchain/11.3-aarch64/bin/:$PATH
           touch .scmversion
 
       - name: 清理 & 编译设备树 dtbs
@@ -77,10 +72,14 @@ jobs:
           [ ! -f "$PWD/out-modules/lib/modules/$KERNEL_VER/modules.dep" ] && depmod -b out-modules -E Module.symvers -F System.map -w $KERNEL_VER
           (cd out-modules && find . -name *.ko | xargs aarch64-linux-strip --strip-unneeded)
 
-      - name: 压缩模块为 zip
+      # ==============================================
+      # 替换为 tar.gz，避免符号链接循环
+      # ==============================================
+      - name: 压缩模块为 tar.gz
         run: |
           cd MRWmrfox_kernel_rk3328
-          zip -r out-modules.zip out-modules
+          # 只打包 lib 目录，彻底避免 build/ 符号链接循环
+          tar zcvf out-modules.tar.gz -C out-modules lib
 
       # ==============================================
       # 编译完成 → 使用 mrw-tools 打包镜像
@@ -98,7 +97,7 @@ jobs:
       - name: 展示最终文件
         run: |
           cd MRWmrfox_kernel_rk3328
-          ls -lh kernel.img resource.img out-modules.zip
+          ls -lh kernel.img resource.img out-modules.tar.gz
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
@@ -107,7 +106,7 @@ jobs:
           path: |
             MRWmrfox_kernel_rk3328/kernel.img
             MRWmrfox_kernel_rk3328/resource.img
-            MRWmrfox_kernel_rk3328/out-modules.zip
+            MRWmrfox_kernel_rk3328/out-modules.tar.gz
 
       - name: 自动发布 Release
         uses: softprops/action-gh-release@v1
@@ -120,7 +119,6 @@ jobs:
           files: |
             MRWmrfox_kernel_rk3328/kernel.img
             MRWmrfox_kernel_rk3328/resource.img
-            MRWmrfox_kernel_rk3328/out-modules.zip
+            MRWmrfox_kernel_rk3328/out-modules.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
