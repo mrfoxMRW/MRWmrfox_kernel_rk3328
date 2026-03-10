@@ -1,1 +1,123 @@
+name: 构建 RK3328 Kernel
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+      - name: 安装系统依赖（zip、curl 等）
+        run: |
+          sudo apt-get -y update
+          sudo apt-get install -y sudo curl zip
+
+      - name: 安装 FriendlyElec 编译环境
+        run: |
+          sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/friendlyarm/build-env-on-ubuntu-bionic/master/install.sh)"
+
+      - name: 配置交叉编译工具链 PATH
+        run: |
+          echo 'export PATH=/opt/FriendlyARM/toolchain/11.3-aarch64/bin:$PATH' >> ~/.bashrc
+          echo 'export GCC_COLORS=auto' >> ~/.bashrc
+          . ~/.bashrc
+
+      - name: 验证 toolchain
+        run: aarch64-linux-gcc -v
+
+      # ==============================================
+      # 工具全部提前下载，目录：mrw-tools（防重名）
+      # ==============================================
+      - name: 提前下载内核打包工具 mrw-tools
+        run: |
+          mkdir -p mrw-tools
+          wget -P mrw-tools https://raw.githubusercontent.com/friendlyarm/sd-fuse_rk3328/kernel-6.1.y/tools/mkkrnlimg
+          wget -P mrw-tools https://raw.githubusercontent.com/friendlyarm/sd-fuse_rk3328/kernel-6.1.y/tools/resource_tool
+          wget -P mrw-tools https://raw.githubusercontent.com/friendlyarm/sd-fuse_rk3328/kernel-6.1.y/prebuilt/boot/logo.bmp
+          wget -P mrw-tools https://raw.githubusercontent.com/friendlyarm/sd-fuse_rk3328/kernel-6.1.y/prebuilt/boot/logo_kernel.bmp
+          chmod +x mrw-tools/mkkrnlimg mrw-tools/resource_tool
+
+      - name: 克隆内核源码
+        run: |
+          git clone https://github.com/mrfoxMRW/MRWmrfox_kernel_rk3328
+
+      - name: 准备编译环境
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          export PATH=/opt/FriendlyARM/toolchain/11.3-aarch64/bin/:$PATH
+          touch .scmversion
+
+      - name: 清理 & 编译设备树 dtbs
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          if [ -f .config ]; then
+            make CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 clean
+          fi
+          make CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 dtbs
+
+      - name: 正式编译内核
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          make CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 -j$(nproc)
+
+      - name: 编译 & 处理内核模块
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          mkdir -p out-modules && rm -rf out-modules/*
+          make CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 INSTALL_MOD_PATH="$PWD/out-modules" modules -j$(nproc)
+          make CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 INSTALL_MOD_PATH="$PWD/out-modules" modules_install
+
+          KERNEL_VER=$(make CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 kernelrelease)
+          echo "KERNEL_VER=$KERNEL_VER" >> $GITHUB_ENV
+          [ ! -f "$PWD/out-modules/lib/modules/$KERNEL_VER/modules.dep" ] && depmod -b out-modules -E Module.symvers -F System.map -w $KERNEL_VER
+          (cd out-modules && find . -name *.ko | xargs aarch64-linux-strip --strip-unneeded)
+
+      - name: 压缩模块为 zip
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          zip -r out-modules.zip out-modules
+
+      # ==============================================
+      # 编译完成 → 使用 mrw-tools 打包镜像
+      # ==============================================
+      - name: 生成 kernel.img
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          ../mrw-tools/mkkrnlimg arch/arm64/boot/Image kernel.img
+
+      - name: 生成 resource.img
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          ../mrw-tools/resource_tool --dtbname arch/arm64/boot/dts/rockchip/rk3328-nanopi*-rev*.dtb ../mrw-tools/logo.bmp ../mrw-tools/logo_kernel.bmp
+
+      - name: 展示最终文件
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          ls -lh kernel.img resource.img out-modules.zip
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ env.KERNEL_VER }}
+          path: |
+            MRWmrfox_kernel_rk3328/kernel.img
+            MRWmrfox_kernel_rk3328/resource.img
+            MRWmrfox_kernel_rk3328/out-modules.zip
+
+      - name: 自动发布 Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: kernel-${{ env.KERNEL_VER }}-${{ github.sha }}
+          name: Kernel ${{ env.KERNEL_VER }}
+          body: |
+            自动构建内核
+            版本：${{ env.KERNEL_VER }}
+          files: |
+            MRWmrfox_kernel_rk3328/kernel.img
+            MRWmrfox_kernel_rk3328/resource.img
+            MRWmrfox_kernel_rk3328/out-modules.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
