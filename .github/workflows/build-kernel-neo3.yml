@@ -73,13 +73,13 @@ jobs:
           (cd out-modules && find . -name *.ko | xargs aarch64-linux-strip --strip-unneeded)
 
       # ==============================================
-      # 替换为 tar.gz，避免符号链接循环
+      # 打包整个 out-modules 为 tar.gz，保留符号链接
       # ==============================================
-      - name: 压缩模块为 tar.gz
+      - name: 压缩模块为 tar.gz（保留整个 out-modules）
         run: |
           cd MRWmrfox_kernel_rk3328
-          # 只打包 lib 目录，彻底避免 build/ 符号链接循环
-          tar zcvf out-modules.tar.gz -C out-modules lib
+          # -h 会把符号链接转为实际文件，彻底避免循环递归
+          tar zchvf out-modules.tar.gz out-modules
 
       # ==============================================
       # 编译完成 → 使用 mrw-tools 打包镜像
