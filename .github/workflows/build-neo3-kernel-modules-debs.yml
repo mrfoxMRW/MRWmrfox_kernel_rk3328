@@ -76,10 +76,14 @@ jobs:
           make CROSS_COMPILE=aarch64-linux-gnu- ARCH=arm64 KDEB_DESTDIR="../mrw_debs" deb-pkg
           ls -lh ../mrw_debs/
 
-      - name: 压缩模块为 tar.gz
+      # ==============================================
+      # ✅ 修复：打包整个 out-modules，同时避免符号链接循环
+      # ==============================================
+      - name: 压缩模块为 tar.gz（保留整个 out-modules，避免循环）
         run: |
           cd MRWmrfox_kernel_rk3328
-          tar zchvf out-modules.tar.gz out-modules
+          # --dereference：把符号链接转为实际文件，彻底斩断 build/source 循环
+          tar zcvf out-modules.tar.gz --dereference out-modules
 
       - name: 压缩 deb 目录为 tar.gz
         run: |
