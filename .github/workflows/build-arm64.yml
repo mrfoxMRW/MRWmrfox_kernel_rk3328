@@ -1,0 +1,135 @@
+name: 构建 RK3328 Kernel (Arm64 原生)
+
+on:
+  push:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04-arm64  # 换成原生 Arm64 机器
+    steps:
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get -y update
+          sudo apt-get install -y sudo curl gzip tar build-essential ncurses-dev libssl-dev bc kmod cpio flex libelf-dev debhelper devscripts
+
+      - name: 安装 FriendlyElec 编译环境
+        run: |
+          sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/friendlyarm/build-env-on-ubuntu-bionic/master/install.sh)"
+
+      - name: 配置交叉编译工具链 PATH（全局生效）
+        run: |
+          echo "/opt/FriendlyARM/toolchain/11.3-aarch64/bin" >> $GITHUB_PATH
+          echo "GCC_COLORS=auto" >> $GITHUB_ENV
+
+      - name: 验证 toolchain
+        run: aarch64-linux-gcc -v
+
+      - name: 克隆内核源码
+        run: |
+          git clone https://github.com/mrfoxMRW/MRWmrfox_kernel_rk3328
+
+      - name: 准备编译环境
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          touch .scmversion
+          mkdir -p ../mrw_debs
+
+      - name: 清理 & 编译设备树 dtbs
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          if [ -f .config ]; then
+            make ARCH=arm64 clean  # 去掉 CROSS_COMPILE
+          fi
+          make ARCH=arm64 dtbs     # 去掉 CROSS_COMPILE
+
+      - name: 正式编译内核
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          make ARCH=arm64 -j$(nproc)  # 去掉 CROSS_COMPILE
+
+      - name: 编译 & 处理内核模块
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          mkdir -p out-modules && rm -rf out-modules/*
+          make ARCH=arm64 INSTALL_MOD_PATH="$PWD/out-modules" modules -j$(nproc)  # 去掉 CROSS_COMPILE
+          make ARCH=arm64 INSTALL_MOD_PATH="$PWD/out-modules" modules_install        # 去掉 CROSS_COMPILE
+
+          KERNEL_VER=$(make ARCH=arm64 kernelrelease)  # 去掉 CROSS_COMPILE
+          echo "KERNEL_VER=$KERNEL_VER" >> $GITHUB_ENV
+          [ ! -f "$PWD/out-modules/lib/modules/$KERNEL_VER/modules.dep" ] && depmod -b out-modules -E Module.symvers -F System.map -w $KERNEL_VER
+          (cd out-modules && find . -name *.ko | xargs aarch64-linux-strip --strip-unneeded)
+
+      - name: 生成内核 deb 包
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          make ARCH=arm64 KDEB_DESTDIR="../mrw_debs" deb-pkg  # 去掉 CROSS_COMPILE
+          ls -lh ../mrw_debs/
+
+      # ==============================================
+      # ✅ 压缩模块为 tar.gz（保留整个 out-modules，避免循环）
+      # ==============================================
+      - name: 压缩模块为 tar.gz
+        run: |
+          cd MRWmrfox_kernel_rk3328
+          tar zcvf out-modules.tar.gz --dereference out-modules
+
+      # ==============================================
+      # ✅ 打包 rockchip dts 目录为 tar.gz
+      # ==============================================
+      - name: 打包 rockchip dts 目录
+        run: |
+          cd MRWmrfox_kernel_rk3328/arch/arm64/boot/dts
+          tar zcvf rockchip.tar.gz rockchip
+          mv rockchip.tar.gz ../../../../  # 移到根目录方便上传
+
+      - name: 压缩 deb 目录为 tar.gz
+        run: |
+          tar zchvf mrw_debs.tar.gz mrw_debs
+
+      - name: 获取构建时间
+        id: time
+        run: echo "BUILD_TIME=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_ENV
+
+      - name: 展示所有文件
+        run: |
+          ls -lh MRWmrfox_kernel_rk3328/arch/arm64/boot/Image
+          ls -lh rockchip.tar.gz
+          ls -lh MRWmrfox_kernel_rk3328/out-modules.tar.gz
+          ls -lh mrw_debs.tar.gz
+
+      # ==============================================
+      # ✅ 上传产物：Image + rockchip.tar.gz + out-modules.tar.gz + mrw_debs.tar.gz
+      # ==============================================
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-${{ env.KERNEL_VER }}-${{ env.BUILD_TIME }}
+          path: |
+            MRWmrfox_kernel_rk3328/arch/arm64/boot/Image
+            rockchip.tar.gz
+            MRWmrfox_kernel_rk3328/out-modules.tar.gz
+            mrw_debs.tar.gz
+
+      - name: 发布 Release（按时间命名）
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: kernel-${{ env.KERNEL_VER }}-${{ env.BUILD_TIME }}
+          name: Kernel ${{ env.KERNEL_VER }} 构建于 ${{ env.BUILD_TIME }}
+          body: |
+            自动构建 RK3328 内核 (Arm64 原生)
+            版本：${{ env.KERNEL_VER }}
+            构建时间：${{ env.BUILD_TIME }}
+            包含文件：
+            - Image (内核镜像)
+            - rockchip.tar.gz (RK3328 设备树)
+            - out-modules.tar.gz (内核模块)
+            - mrw_debs.tar.gz (内核 deb 包)
+          files: |
+            MRWmrfox_kernel_rk3328/arch/arm64/boot/Image
+            rockchip.tar.gz
+            MRWmrfox_kernel_rk3328/out-modules.tar.gz
+            mrw_debs.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
