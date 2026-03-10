@@ -146,7 +146,7 @@
 	#sound-dai-cells = <0>;
 	status = "okay";
 	pinctrl-names = "default";
-	pinctrl-0 = <&i2s1_mclk &i2s1_sclk &i2s1_lrcktx &i2s1_sdo &i2s1_sdi>;
+	pinctrl-0 = <&i2s1_sclk &i2s1_lrcktx &i2s1_sdo &i2s1_sdi>;
 	/*pinctrl-names = "default";*/
 	/* rockchip,grf = <&grf>; */
 	/* rockchip,clk-src = <1>; */
