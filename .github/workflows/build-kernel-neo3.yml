@@ -2,7 +2,7 @@ name: 构建 RK3328 Kernel
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
   workflow_dispatch:
 
 jobs:
